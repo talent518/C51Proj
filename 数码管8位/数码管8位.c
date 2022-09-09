@@ -44,6 +44,9 @@ main() {
 			nn = i;
 			for(j=0; j<10/nn; j++) {
 				for(i=0; i<nn; i++) {
+					P0 = 0;
+					LATCH1=1;
+					LATCH1=0;
 					P0 = addrs[7-i];
 					LATCH2=1;
 					LATCH2=0;

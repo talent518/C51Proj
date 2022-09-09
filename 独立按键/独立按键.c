@@ -23,8 +23,8 @@ sbit KEY8=P3^7;
                    定义数码管接口
 ------------------------------------------------*/
 #define DataPort P0 //定义数据端口 程序中遇到DataPort 则用P0 替换
-sbit LATCH1=P2^3;//定义锁存使能端口 段锁存
-sbit LATCH2=P2^2;//                 位锁存
+sbit LATCH1=P2^2;//定义锁存使能端口 段锁存
+sbit LATCH2=P2^3;//                 位锁存
 
 unsigned char dofly_DuanMa[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};// 显示段码值0~9
 unsigned char dofly_WeiMa[8]={0xfe,0xfd,0xfb,0xf7,0xef,0xdf,0xbf,0x7f};//分别对应相应的数码管点亮,即位码
@@ -100,7 +100,7 @@ void Display(unsigned char Num) {
 	DataPort=TempData[i]; //取显示数据，段码
 	LATCH1=1;     //段锁存
 	LATCH1=0;
-       
+
 	i++;
 	if(i==Num)
 		i=0;

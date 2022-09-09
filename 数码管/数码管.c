@@ -21,7 +21,7 @@ main() {
 	char i;
 	while(1) {
 		for(i=0; i<N; i++) {
-			P1 = nums[i];
+			P3 = nums[i];
 			delay();
 		}
 	}

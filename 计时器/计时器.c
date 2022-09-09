@@ -128,14 +128,19 @@ void Timer0_isr(void) interrupt 1 using 1 {
 		}
 	}
 	
+	P0 = 0;
+	LATCH1=1;
+	LATCH1=0;
+	
 	P0 = addrs[LED8i];
 	LATCH2=1;
 	LATCH2=0;
+	
 	P0 = nums[LED8s[LED8i]];
 	LATCH1=1;
 	LATCH1=0;
+	
 	if(++LED8i == LED8in) {
 		LED8i = 0;
 	}
-	P0 = 0xff;
 }
