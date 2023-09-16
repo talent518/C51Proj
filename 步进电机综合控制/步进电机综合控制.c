@@ -9,22 +9,25 @@
 
 #include <reg52.h>
 
-#define KeyPort P3
-#define DataPort P0 //定义数据端口 程序中遇到DataPort 则用P0 替换
-sbit LATCH1 = P2 ^ 2; //定义锁存使能端口 段锁存
-sbit LATCH2 = P2 ^ 3; //                 位锁存
+#define KeyPort P3 // 独立按键IO
+#define DataPort P0 // 8位数码管数据IO
+sbit LATCH1 = P2 ^ 2; // 8位数码管 段锁存
+sbit LATCH2 = P2 ^ 3; //           位锁存
 
-unsigned char code dofly_DuanMa[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}; // 显示段码值0~9
-unsigned char code dofly_WeiMa[] = {0xfe, 0xfd, 0xfb, 0xf7, 0xef, 0xdf, 0xbf, 0x7f}; //分别对应相应的数码管点亮,即位码
-unsigned char TempData[8]; //存储显示值的全局变量
-
-sbit A1 = P1 ^ 0; //定义步进电机连接端口
+// 步进电机IO
+sbit A1 = P1 ^ 0;
 sbit B1 = P1 ^ 1;
 sbit C1 = P1 ^ 2;
 sbit D1 = P1 ^ 3;
 
+const unsigned char code dofly_DuanMa[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}; // 显示段码值0~9
+const unsigned char code dofly_WeiMa[] = {0xfe, 0xfd, 0xfb, 0xf7, 0xef, 0xdf, 0xbf, 0x7f}; //分别对应相应的数码管点亮,即位码
+unsigned char TempData[8]; //存储显示值的全局变量
+
 unsigned char Speed = 1;
-bit StopFlag;
+volatile unsigned short cycles = 0;
+bit StopFlag = 0, reverseFlag = 0;
+
 void Display(unsigned char FirstBit, unsigned char Num);
 void Init_Timer0(void);
 unsigned char KeyScan(void);
@@ -45,7 +48,6 @@ void DelayUs2x(unsigned char t)
 ------------------------------------------------*/
 void DelayMs(unsigned char t)
 {
-
     while (t--) {
         //大致延时1mS
         DelayUs2x(245);
@@ -57,27 +59,36 @@ void DelayMs(unsigned char t)
 ------------------------------------------------*/
 main()
 {
-    unsigned int i = 512; //旋转一周时间
-    unsigned char num;
+    unsigned char num, i;
+    unsigned short n;
     Init_Timer0();
     A1 = B1 = C1 = D1 = 0;
     while (1) { //正向
         num = KeyScan();  //循环调用按键扫描
         if (num == 1) { //第一个按键,速度等级增加
-            if (Speed < 19)
+            if (Speed < 9)
                 Speed++;
         } else if (num == 2) { //第二个按键，速度等级减小
             if (Speed > 1)
                 Speed--;
-        } else if (num == 3) { //电机停止
-            A1 = B1 = C1 = D1 = 0;
-            StopFlag = 1;
-        } else if (num == 4) { //电机启动
-            StopFlag = 0;
+        } else if (num == 3) { //电机启动或停止
+            if(StopFlag) {
+                StopFlag = 0;
+            } else {
+                A1 = B1 = C1 = D1 = 0;
+                StopFlag = 1;
+            }
+        } else if (num == 4) { //电机倒转或正转
+            reverseFlag = !reverseFlag;
         }
         //分解显示信息，如要显示68，则68/10=6  68%10=8
-        TempData[0] = dofly_DuanMa[Speed / 10];
-        TempData[1] = dofly_DuanMa[Speed % 10];
+        TempData[0] = dofly_DuanMa[Speed % 10];
+        
+        n = cycles;
+        for(i = 7; i >= 3; i --) {
+          TempData[i] = dofly_DuanMa[n % 10];
+          n /= 10;
+        }
     }
 }
 
@@ -127,18 +138,26 @@ void Init_Timer0(void)
 /*------------------------------------------------
                  定时器中断子程序
 ------------------------------------------------*/
+const unsigned short timer0 = (65535 - 1000);
 void Timer0_isr(void) interrupt 1
 {
-    static unsigned char times, i;
-    TH0 = (65536 - 1000) / 256;   //重新赋值 1ms
-    TL0 = (65536 - 1000) % 256;
+    static unsigned char times = 0, i = 0;
+    static unsigned short n = 0;
+    TH0 = timer0 / 256;   //重新赋值 1ms
+    TL0 = timer0 % 256;
 
     Display(0, 8);
-    if (!StopFlag) {
-        if (times == (20 - Speed)) { //最大值18，所以最小间隔值20-18=2
+    if(StopFlag) {
+        times = 0;
+        if(reverseFlag) i = 0;
+        else i = 7;
+        n = 0;
+        cycles = 0;
+    } else {
+        if(times == (10 - Speed)) { //最大值18，所以最小间隔值20-18=2
             times = 0;
             switch (i) {
-                case 8:
+               case 8: // 倒转
                     i = 0;
                 case 0:
                     A1 = 1;
@@ -182,16 +201,21 @@ void Timer0_isr(void) interrupt 1
                     C1 = 0;
                     D1 = 1;
                     break;
-                 case 7:
+                default: // 正转
+                    i = 7;
+                case 7:
                     A1 = 1;
                     B1 = 0;
                     C1 = 0;
                     D1 = 1;
                     break;
-               default:
-                    break;
             }
-            i++;
+            if(reverseFlag) i++;
+            else i--;
+            if(++n == 64 * 16) {
+              n = 0;
+              cycles ++;
+            }
         }
         times++;
     }
