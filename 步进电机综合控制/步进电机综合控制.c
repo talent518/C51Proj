@@ -21,6 +21,7 @@ sbit C1 = P1 ^ 2;
 sbit D1 = P1 ^ 3;
 
 sbit TC = P1 ^ 4; // 计时器周期
+sbit MC = P1 ^ 5; // 主函数周期
 
 const unsigned char code dofly_DuanMa[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}; // 显示段码值0~9
 const unsigned char code dofly_WeiMa[] = {0xfe, 0xfd, 0xfb, 0xf7, 0xef, 0xdf, 0xbf, 0x7f}; //分别对应相应的数码管点亮,即位码
@@ -35,46 +36,28 @@ bit StopFlag = 0, reverseFlag = 0;
 
 void Display(unsigned char FirstBit, unsigned char Num);
 void Init_Timer0(void);
+void Init_Timer1(void);
 unsigned char KeyScan(void);
-/*------------------------------------------------
- uS延时函数，含有输入参数 unsigned char t，无返回值
- unsigned char 是定义无符号字符变量，其值的范围是
- 0~255 这里使用晶振12M，精确延时请使用汇编,大致延时
- 长度如下 T=tx2+5 uS
-------------------------------------------------*/
-void DelayUs2x(unsigned char t)
-{
-    while (--t);
-}
-/*------------------------------------------------
- mS延时函数，含有输入参数 unsigned char t，无返回值
- unsigned char 是定义无符号字符变量，其值的范围是
- 0~255 这里使用晶振12M，精确延时请使用汇编
-------------------------------------------------*/
-void DelayMs(unsigned char t)
-{
-    while (t--) {
-        //大致延时1mS
-        DelayUs2x(245);
-        DelayUs2x(245);
-    }
-}
+
 /*------------------------------------------------
                     主函数
 ------------------------------------------------*/
 void CalcSpeed(void)
 {
-    TimerCycle = (65535 - 1000 - (MaxSpeed - Speed) * 50);
+    TimerCycle = (65536 - 1000 - (MaxSpeed - Speed) * 50);
 }
 main(void)
 {
     unsigned char num, i;
     unsigned short n;
+    unsigned int msec = 0;
     
     A1 = B1 = C1 = D1 = 0;
     CalcSpeed();
     Init_Timer0();
+    Init_Timer1();
     while (1) { //正向
+        MC = 1;
         num = KeyScan();  //循环调用按键扫描
         if (num == 1) { //第一个按键,速度等级增加
             if (Speed < MaxSpeed) {
@@ -108,8 +91,11 @@ main(void)
         
         Display(0, 8);
         
-        milliseconds ++;
-        DelayMs(1);
+        MC = 0;
+        
+        // 延时1毫秒
+        while(msec == milliseconds);
+        msec = milliseconds;
     }
 }
 
@@ -148,10 +134,20 @@ void Init_Timer0(void)
     TMOD |= 0x01;    //使用模式1，16位定时器，使用"|"符号可以在使用多个定时器时不受影响
     TH0 = TimerCycle / 256;   //重新赋值 1ms
     TL0 = TimerCycle % 256;
-    EA = 1;          //总中断打开
+    EA  = 1;          //总中断打开
     ET0 = 1;         //定时器中断打开
     TR0 = 1;         //定时器开关打开
     PT0 = 1;         //优先级打开
+}
+void Init_Timer1(void)
+{
+    TMOD |= 0x10;    //使用模式1，16位定时器，使用"|"符号可以在使用多个定时器时不受影响
+    TH1 = (65536 - 1000) / 256;   //重新赋值 1ms
+    TL1 = (65536 - 1000) % 256;
+    EA  = 1;          //总中断打开
+    ET1 = 1;         //定时器中断打开
+    TR1 = 1;         //定时器开关打开
+    PT1 = 1;         //优先级打开
 }
 /*------------------------------------------------
                  定时器中断子程序
@@ -235,19 +231,68 @@ void Timer0_isr(void) interrupt 1
     }
     TC = 0;
 }
+void Timer1_isr(void) interrupt 3
+{
+    TH1 = (65536 - 1000) / 256;   //重新赋值 1ms
+    TL1 = (65536 - 1000) % 256;
+    
+    milliseconds ++;
+}
 
 /*------------------------------------------------
 按键扫描函数，返回扫描键值
 ------------------------------------------------*/
 unsigned char KeyScan(void)
 {
-    static unsigned char keyval = 0xff;
-    static unsigned int msec = 0;
+    static unsigned char KEY = 0xff;
+    static unsigned int msec = 0, msec2 = 0;
     
-    unsigned char val = KeyPort, ret = 0;
-    if (val != keyval) {
-        if(keyval != 0xff && milliseconds - msec > 50) { // 按下50毫秒以上
-            switch (keyval) {
+    unsigned char key = KeyPort, ret = 0;
+    unsigned int val2;
+    if (key != KEY) {
+        if(KEY != 0xff) { // 按下50毫秒以上
+            val2 = milliseconds - msec;
+            
+            if(val2 > 50 && val2 < 500) {
+                switch (KEY) {
+                    case 0xfe:
+                        ret = 1;
+                        break;
+                    case 0xfd:
+                        ret = 2;
+                        break;
+                    case 0xfb:
+                        ret = 3;
+                        break;
+                    case 0xf7:
+                        ret = 4;
+                        break;
+                    case 0xef:
+                        ret = 5;
+                        break;
+                    case 0xdf:
+                        ret = 6;
+                        break;
+                    case 0xbf:
+                        ret = 7;
+                        break;
+                    case 0x7f:
+                        ret = 8;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        KEY = key;
+        msec = milliseconds;
+        msec2 = 0;
+    } else if(key != 0xff && milliseconds - msec > 500) {
+        val2 = (milliseconds - msec - 500) / 100;
+        if(val2 != msec2) {
+            msec2 = val2;
+            
+            switch (key) {
                 case 0xfe:
                     ret = 1;
                     break;
@@ -276,8 +321,6 @@ unsigned char KeyScan(void)
                     break;
             }
         }
-        keyval = val;
-        msec = milliseconds;
     }
     return ret;
 }
