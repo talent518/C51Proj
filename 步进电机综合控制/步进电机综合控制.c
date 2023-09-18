@@ -20,12 +20,17 @@ sbit B1 = P1 ^ 1;
 sbit C1 = P1 ^ 2;
 sbit D1 = P1 ^ 3;
 
+sbit TC = P1 ^ 4; // 计时器周期
+
 const unsigned char code dofly_DuanMa[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}; // 显示段码值0~9
 const unsigned char code dofly_WeiMa[] = {0xfe, 0xfd, 0xfb, 0xf7, 0xef, 0xdf, 0xbf, 0x7f}; //分别对应相应的数码管点亮,即位码
 unsigned char TempData[8]; //存储显示值的全局变量
 
-unsigned char Speed = 1;
+#define MaxSpeed 80
+unsigned char Speed = MaxSpeed / 2;
+unsigned short TimerCycle;
 volatile unsigned short cycles = 0;
+volatile unsigned int milliseconds = 0;
 bit StopFlag = 0, reverseFlag = 0;
 
 void Display(unsigned char FirstBit, unsigned char Num);
@@ -57,20 +62,30 @@ void DelayMs(unsigned char t)
 /*------------------------------------------------
                     主函数
 ------------------------------------------------*/
-main()
+void CalcSpeed(void)
+{
+    TimerCycle = (65535 - 1000 - (MaxSpeed - Speed) * 50);
+}
+main(void)
 {
     unsigned char num, i;
     unsigned short n;
-    Init_Timer0();
+    
     A1 = B1 = C1 = D1 = 0;
+    CalcSpeed();
+    Init_Timer0();
     while (1) { //正向
         num = KeyScan();  //循环调用按键扫描
         if (num == 1) { //第一个按键,速度等级增加
-            if (Speed < 9)
+            if (Speed < MaxSpeed) {
                 Speed++;
+                CalcSpeed();
+            }
         } else if (num == 2) { //第二个按键，速度等级减小
-            if (Speed > 1)
+            if (Speed) {
                 Speed--;
+                CalcSpeed();
+            }
         } else if (num == 3) { //电机启动或停止
             if(StopFlag) {
                 StopFlag = 0;
@@ -82,13 +97,19 @@ main()
             reverseFlag = !reverseFlag;
         }
         //分解显示信息，如要显示68，则68/10=6  68%10=8
-        TempData[0] = dofly_DuanMa[Speed % 10];
+        TempData[0] = dofly_DuanMa[Speed / 10];
+        TempData[1] = dofly_DuanMa[Speed % 10];
         
         n = cycles;
         for(i = 7; i >= 3; i --) {
           TempData[i] = dofly_DuanMa[n % 10];
           n /= 10;
         }
+        
+        Display(0, 8);
+        
+        milliseconds ++;
+        DelayMs(1);
     }
 }
 
@@ -102,7 +123,6 @@ main()
 void Display(unsigned char FirstBit, unsigned char Num)
 {
     static unsigned char i = 0;
-
 
     DataPort = 0; //清空数据，防止有交替重影
     LATCH1 = 1;   //段锁存
@@ -119,8 +139,6 @@ void Display(unsigned char FirstBit, unsigned char Num)
     i++;
     if (i == Num)
         i = 0;
-
-
 }
 /*------------------------------------------------
                     定时器初始化子程序
@@ -128,8 +146,8 @@ void Display(unsigned char FirstBit, unsigned char Num)
 void Init_Timer0(void)
 {
     TMOD |= 0x01;    //使用模式1，16位定时器，使用"|"符号可以在使用多个定时器时不受影响
-//TH0=0x00;          //给定初值
-//TL0=0x00;
+    TH0 = TimerCycle / 256;   //重新赋值 1ms
+    TL0 = TimerCycle % 256;
     EA = 1;          //总中断打开
     ET0 = 1;         //定时器中断打开
     TR0 = 1;         //定时器开关打开
@@ -138,15 +156,14 @@ void Init_Timer0(void)
 /*------------------------------------------------
                  定时器中断子程序
 ------------------------------------------------*/
-const unsigned short timer0 = (65535 - 1000);
 void Timer0_isr(void) interrupt 1
 {
     static unsigned char times = 0, i = 0;
     static unsigned short n = 0;
-    TH0 = timer0 / 256;   //重新赋值 1ms
-    TL0 = timer0 % 256;
+    TH0 = TimerCycle / 256;   //重新赋值 1ms
+    TL0 = TimerCycle % 256;
+    TC = 1;
 
-    Display(0, 8);
     if(StopFlag) {
         times = 0;
         if(reverseFlag) i = 0;
@@ -154,71 +171,69 @@ void Timer0_isr(void) interrupt 1
         n = 0;
         cycles = 0;
     } else {
-        if(times == (10 - Speed)) { //最大值18，所以最小间隔值20-18=2
-            times = 0;
-            switch (i) {
-               case 8: // 倒转
-                    i = 0;
-                case 0:
-                    A1 = 1;
-                    B1 = 0;
-                    C1 = 0;
-                    D1 = 0;
-                    break;
-                case 1:
-                    A1 = 1;
-                    B1 = 1;
-                    C1 = 0;
-                    D1 = 0;
-                    break;
-                case 2:
-                    A1 = 0;
-                    B1 = 1;
-                    C1 = 0;
-                    D1 = 0;
-                    break;
-                case 3:
-                    A1 = 0;
-                    B1 = 1;
-                    C1 = 1;
-                    D1 = 0;
-                    break;
-                case 4:
-                    A1 = 0;
-                    B1 = 0;
-                    C1 = 1;
-                    D1 = 0;
-                    break;
-                case 5:
-                    A1 = 0;
-                    B1 = 0;
-                    C1 = 1;
-                    D1 = 1;
-                    break;
-                case 6:
-                    A1 = 0;
-                    B1 = 0;
-                    C1 = 0;
-                    D1 = 1;
-                    break;
-                default: // 正转
-                    i = 7;
-                case 7:
-                    A1 = 1;
-                    B1 = 0;
-                    C1 = 0;
-                    D1 = 1;
-                    break;
-            }
-            if(reverseFlag) i++;
-            else i--;
-            if(++n == 64 * 16) {
-              n = 0;
-              cycles ++;
-            }
+        switch (i) {
+           case 8: // 倒转
+                i = 0;
+            case 0:
+                A1 = 1;
+                B1 = 0;
+                C1 = 0;
+                D1 = 0;
+                break;
+            case 1:
+                A1 = 1;
+                B1 = 1;
+                C1 = 0;
+                D1 = 0;
+                break;
+            case 2:
+                A1 = 0;
+                B1 = 1;
+                C1 = 0;
+                D1 = 0;
+                break;
+            case 3:
+                A1 = 0;
+                B1 = 1;
+                C1 = 1;
+                D1 = 0;
+                break;
+            case 4:
+                A1 = 0;
+                B1 = 0;
+                C1 = 1;
+                D1 = 0;
+                break;
+            case 5:
+                A1 = 0;
+                B1 = 0;
+                C1 = 1;
+                D1 = 1;
+                break;
+            case 6:
+                A1 = 0;
+                B1 = 0;
+                C1 = 0;
+                D1 = 1;
+                break;
+            default: // 正转
+                i = 7;
+            case 7:
+                A1 = 1;
+                B1 = 0;
+                C1 = 0;
+                D1 = 1;
+                break;
         }
-        times++;
+        if(reverseFlag) i++;
+        else i--;
+        
+        if(++n == 64 * 16) {
+          n = 0;
+          cycles ++;
+        }
     }
+    TC = 0;
 }
 
 /*------------------------------------------------
@@ -226,43 +241,43 @@ void Timer0_isr(void) interrupt 1
 ------------------------------------------------*/
 unsigned char KeyScan(void)
 {
-    unsigned char keyvalue;
-    if (KeyPort != 0xff) {
-        DelayMs(10);
-        if (KeyPort != 0xff) {
-            keyvalue = KeyPort;
-            while (KeyPort != 0xff);
-            switch (keyvalue) {
+    static unsigned char keyval = 0xff;
+    static unsigned int msec = 0;
+    
+    unsigned char val = KeyPort, ret = 0;
+    if (val != keyval) {
+        if(keyval != 0xff && milliseconds - msec > 50) { // 按下50毫秒以上
+            switch (keyval) {
                 case 0xfe:
-                    return 1;
+                    ret = 1;
                     break;
                 case 0xfd:
-                    return 2;
+                    ret = 2;
                     break;
                 case 0xfb:
-                    return 3;
+                    ret = 3;
                     break;
                 case 0xf7:
-                    return 4;
+                    ret = 4;
                     break;
                 case 0xef:
-                    return 5;
+                    ret = 5;
                     break;
                 case 0xdf:
-                    return 6;
+                    ret = 6;
                     break;
                 case 0xbf:
-                    return 7;
+                    ret = 7;
                     break;
                 case 0x7f:
-                    return 8;
+                    ret = 8;
                     break;
                 default:
-                    return 0;
                     break;
             }
         }
+        keyval = val;
+        msec = milliseconds;
     }
-    return 0;
+    return ret;
 }
-
